@@ -58,6 +58,8 @@ public class AppConfig {
     }
 
     public void merge(CandidateConfig candidate) {
+        if (!blank(candidate.schoolId)) schoolId = candidate.schoolId;
+        if (!blank(candidate.schoolName)) schoolName = candidate.schoolName;
         if (!blank(candidate.schoolHost)) schoolHost = candidate.schoolHost;
         if (!blank(candidate.appEdition)) appEdition = candidate.appEdition;
         if (!blank(candidate.platform)) platform = candidate.platform;

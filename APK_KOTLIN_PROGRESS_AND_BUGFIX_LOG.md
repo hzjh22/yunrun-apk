@@ -29,6 +29,34 @@ F:\CIL\yunrun\RunLogKotlin\app\build\outputs\apk\debug\app-debug.apk
 - `network_security_config.xml` 仅保留 `sports.aiyyd.com` 的明文访问例外。
 - App 公告页改为本地开源免费声明，不联网请求公告。
 
+## 2026-06-29 getHomeRunInfo 兼容修复
+
+问题现象：
+
+```text
+Run failed:
+IllegalStateException: getHomeRunInfo has no cralist
+```
+
+原因：
+
+- `/run/getHomeRunInfo` 返回 `code=200` 和 `msg=操作成功`，但 `data` 中只有 `isAvoid`，没有旧逻辑要求的 `cralist`。
+- 旧代码把 `data.cralist` 当成必需字段，因此成功响应也会被本地误判为失败。
+
+修复：
+
+- `RunClient` 先解析当前选中的历史 JSON，再请求 `getHomeRunInfo`。
+- 如果响应包含 `cralist`，继续使用接口返回的跑区参数。
+- 如果响应不包含 `cralist`，不再直接失败，改为从历史 JSON 和当前配置中提取 `raId`、`raType`、`raRunArea`、`schoolId`、`recodeCadence` 等字段。
+- 不写死学校 ID、学校名称、跑区或校区内容。
+- `run/start`、`run/finish` 和分段提交只携带已提取到的可用字段，避免提交空字符串伪配置。
+- 抓包 TXT 导入新增 `schoolId`、`schoolName` 提取，并把 `:9001/api` 同域推导为 `:8080`，不再固定到某个域名。
+
+自测：
+
+- `:app:assembleDebug` 构建通过。
+- 固定学校、私有服务器和授权相关敏感关键词扫描无命中。
+
 ## 页面与功能
 
 首页：

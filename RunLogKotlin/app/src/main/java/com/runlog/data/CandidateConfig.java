@@ -1,6 +1,8 @@
 package com.runlog.data;
 
 public class CandidateConfig {
+    public String schoolId = "";
+    public String schoolName = "";
     public String schoolHost = "";
     public String appEdition = "";
     public String platform = "";

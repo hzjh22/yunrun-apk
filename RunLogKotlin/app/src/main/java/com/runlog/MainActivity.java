@@ -681,6 +681,8 @@ public class MainActivity extends Activity {
                     + "\n候选请求: " + result.candidates.size()
                     + "\n最佳请求: " + candidate.requestLine
                     + "\nHost: " + candidate.requestHost
+                    + "\nschoolId: " + candidate.schoolId
+                    + "\nschoolName: " + candidate.schoolName
                     + "\nschoolHost: " + candidate.schoolHost
                     + "\ntoken: " + com.runlog.data.Masking.value(candidate.token)
                     + "\ndeviceId: " + com.runlog.data.Masking.value(candidate.deviceId)

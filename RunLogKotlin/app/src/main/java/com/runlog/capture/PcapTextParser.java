@@ -8,6 +8,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class PcapTextParser {
     private PcapTextParser() {
@@ -50,7 +52,9 @@ public final class PcapTextParser {
         String requestLine = "";
         Map<String, String> headers = new HashMap<>();
         boolean inHeaders = false;
+        StringBuilder rawMessage = new StringBuilder();
         for (String raw : lines) {
+            rawMessage.append(raw == null ? "" : raw).append('\n');
             String line = raw == null ? "" : raw.trim();
             if (line.startsWith("\uFEFF")) line = line.substring(1);
             if (line.isEmpty()) {
@@ -75,6 +79,8 @@ public final class PcapTextParser {
         CandidateConfig config = new CandidateConfig();
         config.requestLine = requestLine;
         config.requestHost = host;
+        config.schoolId = extractValue(rawMessage.toString(), "schoolId", "school_id");
+        config.schoolName = extractValue(rawMessage.toString(), "schoolName", "school_name");
         config.schoolHost = normalizeSchoolHost(apiBaseFromRequest(requestLine, host), host);
         config.appEdition = header(headers, "version");
         config.platform = header(headers, "platform");
@@ -132,9 +138,32 @@ public final class PcapTextParser {
         String value = base == null ? "" : base.trim();
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
         if (host.endsWith(":9001") || value.endsWith(":9001/api") || value.endsWith(":9001")) {
-            return AppConfig.DEFAULT_SCHOOL_HOST;
+            String source = blank(value) ? "http://" + host : value;
+            source = source.replace(":9001/api", ":8080").replace(":9001", ":8080");
+            while (source.endsWith("/")) source = source.substring(0, source.length() - 1);
+            return source;
         }
         return blank(value) ? AppConfig.DEFAULT_SCHOOL_HOST : value;
+    }
+
+    private static String extractValue(String text, String... names) {
+        if (text == null || names == null) return "";
+        for (String name : names) {
+            String value = match(text, "(?i)\"" + Pattern.quote(name) + "\"\\s*:\\s*\"([^\"]+)\"");
+            if (!blank(value)) return value;
+            value = match(text, "(?i)\"" + Pattern.quote(name) + "\"\\s*:\\s*([0-9]+)");
+            if (!blank(value)) return value;
+            value = match(text, "(?i)(?:^|[?&\\s])" + Pattern.quote(name) + "\\s*=\\s*([^&\\s]+)");
+            if (!blank(value)) return value;
+            value = match(text, "(?i)^\\s*" + Pattern.quote(name) + "\\s*:\\s*(.+)$");
+            if (!blank(value)) return value;
+        }
+        return "";
+    }
+
+    private static String match(String text, String regex) {
+        Matcher matcher = Pattern.compile(regex, Pattern.MULTILINE).matcher(text);
+        return matcher.find() ? matcher.group(1).trim() : "";
     }
 
     private static boolean isRequestLine(String line) {

@@ -5,7 +5,6 @@ import com.runlog.data.AppConfig;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.Locale;
 import java.util.Random;
 
 public class RunClient {
@@ -24,16 +23,16 @@ public class RunClient {
         if (taskJson == null || taskJson.trim().isEmpty()) {
             throw new IllegalArgumentException("data mode requires one imported task JSON");
         }
-        progress(callback, 8, "requesting /run/getHomeRunInfo");
-        HomeInfo home = loadHomeInfo();
-        checkStop(stopCheck);
-        progress(callback, 22, "starting run record");
-        StartInfo start = start(home);
         JSONObject data = taskData(taskJson);
         JSONArray points = data.optJSONArray("pointsList");
         if (points == null || points.length() == 0) {
             throw new IllegalArgumentException("task JSON has no pointsList");
         }
+        progress(callback, 8, "requesting /run/getHomeRunInfo");
+        HomeInfo home = loadHomeInfo(data);
+        checkStop(stopCheck);
+        progress(callback, 22, "starting run record");
+        StartInfo start = start(home);
         int sent = 0;
         for (int from = 0; from < points.length(); from += SPLIT_COUNT) {
             checkStop(stopCheck);
@@ -61,34 +60,57 @@ public class RunClient {
         return new RunResult(start.recordId, sent, preview(finish));
     }
 
-    private HomeInfo loadHomeInfo() throws Exception {
+    private HomeInfo loadHomeInfo(JSONObject taskData) throws Exception {
         String json = api.post("run/getHomeRunInfo", "");
         JSONObject root = new JSONObject(json);
+        if (root.optInt("code", 200) != 200) {
+            throw new IllegalStateException("getHomeRunInfo failed: " + preview(json));
+        }
         JSONObject data = root.optJSONObject("data");
         JSONArray cralist = data == null ? null : data.optJSONArray("cralist");
-        if (cralist == null || cralist.length() == 0) {
-            throw new IllegalStateException("getHomeRunInfo has no cralist: " + preview(json));
+        if (cralist != null && cralist.length() > 0) {
+            return homeFromCra(cralist.getJSONObject(0), taskData);
         }
-        JSONObject item = cralist.getJSONObject(0);
+        return homeFromTask(taskData);
+    }
+
+    private HomeInfo homeFromCra(JSONObject item, JSONObject taskData) {
         HomeInfo out = new HomeInfo();
         out.raType = item.optString("raType");
         out.raId = item.optString("id");
-        out.schoolId = item.optString("schoolId", config.schoolId);
+        out.schoolId = firstNonBlank(item.optString("schoolId"), optString(taskData, "schoolId"), config.schoolId);
         out.raRunArea = item.optString("raRunArea");
         out.raMinDislikes = Math.max(1, item.optInt("raDislikes", 1));
-        out.raCadenceMin = item.optInt("raCadenceMin", 160) + 30;
-        out.raCadenceMax = item.optInt("raCadenceMax", 260) - 150;
-        if (out.raCadenceMax < out.raCadenceMin) out.raCadenceMax = out.raCadenceMin + 20;
+        int min = item.optInt("raCadenceMin", 0);
+        int max = item.optInt("raCadenceMax", 0);
+        if (min > 0 && max > 0) {
+            out.raCadenceMin = min + 30;
+            out.raCadenceMax = max - 150;
+            if (out.raCadenceMax < out.raCadenceMin) out.raCadenceMax = out.raCadenceMin;
+        }
+        if (out.raCadenceMin <= 0 || out.raCadenceMax <= 0) {
+            out.runSteps = cadenceFromTask(taskData);
+        }
         String rawPoints = item.optString("points", "");
         out.homePoints = rawPoints.isEmpty() ? new String[0] : rawPoints.split("\\|");
         return out;
     }
 
+    private HomeInfo homeFromTask(JSONObject data) {
+        HomeInfo out = new HomeInfo();
+        out.raType = firstNonBlank(optString(data, "raType"), optString(data, "recordRaType"));
+        out.raId = firstNonBlank(optString(data, "raId"), optString(data, "runAreaId"), optString(data, "recordRaId"));
+        out.schoolId = firstNonBlank(optString(data, "schoolId"), config.schoolId);
+        out.raRunArea = firstNonBlank(optString(data, "raRunArea"), optString(data, "runArea"), optString(data, "recordRunArea"));
+        out.runSteps = cadenceFromTask(data);
+        return out;
+    }
+
     private StartInfo start(HomeInfo home) throws Exception {
         JSONObject body = new JSONObject();
-        body.put("raRunArea", home.raRunArea);
-        body.put("raType", home.raType);
-        body.put("raId", home.raId);
+        putIfPresent(body, "raRunArea", home.raRunArea);
+        putIfPresent(body, "raType", home.raType);
+        putIfPresent(body, "raId", home.raId);
         String json = api.post("run/start", body.toString());
         JSONObject root = new JSONObject(json);
         if (root.optInt("code") != 200) {
@@ -121,9 +143,9 @@ public class RunClient {
         body.put("appEdition", config.appEdition);
         body.put("raIsStartPoint", "Y");
         body.put("raIsEndPoint", "Y");
-        body.put("raRunArea", home.raRunArea);
-        body.put("raId", String.valueOf(home.raId));
-        body.put("raType", home.raType);
+        putIfPresent(body, "raRunArea", home.raRunArea);
+        putIfPresent(body, "raId", home.raId);
+        putIfPresent(body, "raType", home.raType);
         body.put("id", String.valueOf(start.recordId));
         body.put("recordStartTime", start.recordStartTime);
         body.put("remake", "1");
@@ -142,13 +164,18 @@ public class RunClient {
         body.put("c", JSONObject.NULL);
         body.put("mileage", mileage);
         body.put("orientationNum", 0);
-        body.put("runSteps", randInt(home.raCadenceMin, home.raCadenceMax));
+        int runSteps = home.hasCadenceRange() ? randInt(home.raCadenceMin, home.raCadenceMax) : home.runSteps;
+        if (runSteps <= 0) runSteps = cadenceFromTask(taskData);
+        if (runSteps <= 0) {
+            throw new IllegalArgumentException("task JSON missing recodeCadence or recordMileage/duration for runSteps");
+        }
+        body.put("runSteps", runSteps);
         body.put("cardPointList", points);
         body.put("simulateNum", 0);
         body.put("time", time);
         body.put("crsRunRecordId", start.recordId);
         body.put("speeds", String.valueOf(taskData.opt("recodePace")));
-        body.put("schoolId", home.schoolId);
+        putIfPresent(body, "schoolId", home.schoolId);
         body.put("strides", STRIDES);
         body.put("userName", start.userName);
         return body;
@@ -173,8 +200,45 @@ public class RunClient {
         return min + random.nextInt(max - min + 1);
     }
 
-    private static String format(double value) {
-        return String.format(Locale.US, "%.2f", value);
+    private static int cadenceFromTask(JSONObject data) {
+        int direct = optInt(data, "recodeCadence", "runSteps", "recordCadence", "cadence");
+        if (direct > 0) return direct;
+        double mileageKm = data == null ? 0 : data.optDouble("recordMileage", 0);
+        double durationSeconds = data == null ? 0 : data.optDouble("duration", 0);
+        if (mileageKm > 0 && durationSeconds > 0) {
+            return Math.max(1, (int) Math.round((mileageKm * 1000.0 / STRIDES) / (durationSeconds / 60.0)));
+        }
+        return 0;
+    }
+
+    private static int optInt(JSONObject data, String... keys) {
+        if (data == null || keys == null) return 0;
+        for (String key : keys) {
+            if (key == null || !data.has(key)) continue;
+            int value = data.optInt(key, 0);
+            if (value > 0) return value;
+        }
+        return 0;
+    }
+
+    private static String optString(JSONObject data, String key) {
+        if (data == null || key == null || !data.has(key)) return "";
+        Object value = data.opt(key);
+        return value == null || value == JSONObject.NULL ? "" : String.valueOf(value).trim();
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) return value.trim();
+        }
+        return "";
+    }
+
+    private static void putIfPresent(JSONObject body, String key, String value) throws Exception {
+        if (value != null && !value.trim().isEmpty()) {
+            body.put(key, value.trim());
+        }
     }
 
     private static String preview(String value) {
@@ -209,9 +273,14 @@ public class RunClient {
         String schoolId = "";
         String raRunArea = "";
         int raMinDislikes = 1;
-        int raCadenceMin = 160;
-        int raCadenceMax = 180;
+        int raCadenceMin = 0;
+        int raCadenceMax = 0;
+        int runSteps = 0;
         String[] homePoints = new String[0];
+
+        boolean hasCadenceRange() {
+            return raCadenceMin > 0 && raCadenceMax > 0;
+        }
     }
 
     private static class StartInfo {
