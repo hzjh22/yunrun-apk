@@ -1,0 +1,32 @@
+apply plugin: 'org.jetbrains.kotlin.jvm'
+apply plugin: 'application'
+
+application {
+    mainClass = 'com.runlog.selftest.SelfTestKt'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+sourceSets {
+    testlike {
+        kotlin.srcDir 'src/testlike/kotlin'
+        compileClasspath += sourceSets.main.output + configurations.compileClasspath
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+tasks.register('runSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs parser and config validation self tests without Android device.'
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.testlike.runtimeClasspath
+    mainClass = 'com.runlog.selftest.SelfTestKt'
+}

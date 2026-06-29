@@ -1,0 +1,74 @@
+# Local OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.venv/
+.venv-*/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Android / Gradle build outputs and local machine config
+.gradle/
+.kotlin/
+build/
+**/build/
+local.properties
+*.bak
+*.winbak
+*.iml
+
+# Runtime data and logs
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+captures/
+extracted/
+extracted_tasks/
+tasks_else/
+*.pcap
+*.pcapng
+*.cap
+*.har
+
+# Secrets and signing material
+*.env
+*.p12
+*.pem
+*.jks
+*.keystore
+*keystore*
+*secret*
+*password*
+
+# Binary build artifacts and archives
+*.apk
+*.aab
+*.ap_
+*.7z
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# Reverse engineering / local analysis artifacts
+jadx_out/
+tools/jadx-*/
+apk_strings.txt
+base.apk*
+runlog_home.xml
+
+# Emulator and temporary verification artifacts
+android-avd/
+emulator-verification/
