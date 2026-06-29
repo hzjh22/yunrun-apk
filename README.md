@@ -61,5 +61,8 @@ RunLogKotlin/app/build/outputs/apk/debug/app-debug.apk
 ## 提交注意
 
 提交 Issue 或 PR 时不要附带真实账号、密码、Token、deviceId、抓包文件、学校服务地址、历史跑步轨迹或 APK 签名材料。
+## 感谢
 
+感谢[Zirconium233/yunForNewVersion: 云运动3.4.7版本自动跑步脚本，api是合工大的，也可以针对接口一致的其他学校，主要解决加密问题，提供一些小工具和教程。](https://github.com/Zirconium233/yunForNewVersion)提供的完整的开源学习代码。对于抓包教程可以访问改项目进行查看学习，有帮助的话记得点个start
+## 免责声明
 本项目仅用于学习、研究和个人测试。请遵守所在平台、学校或组织的使用规则。
