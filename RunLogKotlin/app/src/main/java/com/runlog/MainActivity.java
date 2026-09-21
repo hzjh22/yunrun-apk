@@ -56,6 +56,8 @@ import java.util.UUID;
 public class MainActivity extends Activity {
     private static final int REQUEST_IMPORT_CAPTURE = 2101;
     private static final int REQUEST_IMPORT_HISTORY_TASKS = 2102;
+    /** SharedPreferences file holding the last synced account run totals. */
+    private static final String STATS_PREFS = "runlog_account_stats";
     private static final int TAB_HOME = 0;
     private static final int TAB_DATA = 1;
     private static final int TAB_PROFILE = 2;
@@ -92,6 +94,11 @@ public class MainActivity extends Activity {
     private final List<String> dataVisibleNames = new ArrayList<>();
     private String runProgressText = "等待开始";
     private String historyProgressText = "等待提取";
+    /** Current-semester run stats for the signed-in account, filled in by the online extractor. */
+    private int accountTermRuns = -1;
+    private double accountTermKm = 0d;
+    private int accountTermTarget = 0;
+    private String accountTermLabel = "";
     private TextView homeProgressRing;
     private TextView homeProgressCopy;
     private ProgressBar homeProgressBar;
@@ -99,6 +106,12 @@ public class MainActivity extends Activity {
     private ProgressBar historyProgressBar;
     private volatile boolean dataRefreshRunning = false;
     private volatile boolean profileRefreshRunning = false;
+    private volatile boolean termStatsRefreshing = false;
+    /** "" normally, "同步中" / "同步失败" while the term-count refresh is in flight. */
+    private String termStatsState = "";
+    private volatile long lastTermStatsSync = 0L;
+    /** Suppress duplicate auto-pulls (e.g. from card redraws) within this window. */
+    private static final long TERM_STATS_MIN_INTERVAL_MS = 20_000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -291,6 +304,7 @@ public class MainActivity extends Activity {
         sourceRow.addView(count, new LinearLayout.LayoutParams(dp(56), dp(56)));
         source.addView(sourceRow);
         content.addView(source);
+        content.addView(accountStatsCard());
 
         GridLayout tools = toolGrid();
         tools.addView(toolButton("导入历史", "JSON / 轨迹包", v -> pickHistoryTaskFile()));
@@ -319,6 +333,8 @@ public class MainActivity extends Activity {
             content.addView(info("更多", "还有 " + (tasks.size() - visibleTasks.size()) + " 条未显示，可点击“换一组”随机查看。"));
         }
         if (scheduleRefresh) refreshTasksAsync();
+        // Keep the "本学期跑步次数" card live: pull it whenever the tab is opened.
+        refreshTermStatsAsync(true);
     }
 
     private void showProfile() {
@@ -460,6 +476,54 @@ public class MainActivity extends Activity {
             } finally {
                 profileRefreshRunning = false;
             }
+        }).start();
+    }
+
+    /**
+     * Pulls the current-semester run count from the school interface (2 requests) and
+     * re-renders the card. Called when the Data tab is opened and by the card's own
+     * refresh button, so the number stays live without a full history extraction.
+     */
+    private void refreshTermStatsAsync(boolean silent) {
+        if (termStatsRefreshing) return;
+        // showTasks() re-renders the card and calls back in here, so throttle repeat
+        // pulls instead of hammering the interface on every redraw.
+        long now = System.currentTimeMillis();
+        if (silent && now - lastTermStatsSync < TERM_STATS_MIN_INTERVAL_MS) return;
+        ConfigValidationResult validation = ConfigValidator.validate(config);
+        if (!validation.valid || config.draft) {
+            if (!silent) setStatus("配置未通过，无法刷新本学期次数");
+            return;
+        }
+        termStatsRefreshing = true;
+        lastTermStatsSync = now;
+        termStatsState = "同步中";
+        final AppConfig snapshot = config.copy();
+        new Thread(() -> {
+            String error = null;
+            HistoryExtractionResult fetched = null;
+            try {
+                fetched = new HistoryClient(snapshot).fetchTermStats();
+            } catch (Exception e) {
+                error = errorMessage(e);
+            }
+            final HistoryExtractionResult stats = fetched;
+            final String failure = error;
+            runOnUiThread(() -> {
+                termStatsRefreshing = false;
+                if (stats != null) {
+                    saveAccountStats(stats);
+                    termStatsState = "";
+                    log.append("本学期次数已刷新: " + stats.currentRuns
+                            + (stats.targetRuns > 0 ? " / " + stats.targetRuns : "") + " 次");
+                    if (!silent) setStatus("本学期跑步 " + stats.currentRuns + " 次");
+                } else {
+                    termStatsState = "同步失败";
+                    log.append("本学期次数刷新失败: " + failure);
+                    if (!silent) setStatus("刷新本学期次数失败: " + failure);
+                }
+                if (activeTab == TAB_DATA) showTasks(false);
+            });
         }).start();
     }
 
@@ -735,6 +799,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(this::updateHistoryProgressViews);
                 });
                 TaskRepository.ImportResult saved = taskRepository.saveExtractedTasks("在线历史接口", extracted.taskJsons);
+                saveAccountStats(extracted);
                 runOnUiThread(() -> {
                     reload();
                     historyProgressText = "提取完成：学期 " + extracted.terms
@@ -743,9 +808,20 @@ public class MainActivity extends Activity {
                             + "，保存 " + saved.saved;
                     setStatus(saved.saved > 0 ? "在线历史数据已提取" : "未保存到有效历史跑步数据");
                     log.append("在线历史数据提取完成: " + historyProgressText + "，目录=" + saved.directory);
+                    log.append("本学期跑步次数: " + extracted.currentRuns
+                            + (extracted.targetRuns > 0 ? " / " + extracted.targetRuns : "")
+                            + " 次，学期里程 " + HistoryExtractionResult.formatKm(extracted.currentKm)
+                            + " km，学期=" + extracted.currentTermLabel);
                     new AlertDialog.Builder(this)
                             .setTitle("在线历史数据提取结果")
-                            .setMessage(historyProgressText + "\n" + saved.message + "\n保存目录: " + saved.directory)
+                            .setMessage(historyProgressText
+                                    + "\n\n本学期跑步：" + extracted.currentRuns
+                                    + (extracted.targetRuns > 0 ? " / " + extracted.targetRuns : "")
+                                    + " 次"
+                                    + "\n本学期里程：" + HistoryExtractionResult.formatKm(extracted.currentKm) + " km"
+                                    + (extracted.currentTermLabel.isEmpty()
+                                            ? "" : "\n学期：" + extracted.currentTermLabel)
+                                    + "\n" + saved.message + "\n保存目录: " + saved.directory)
                             .setPositiveButton("查看数据", (dialog, which) -> showTasks())
                             .setNegativeButton("关闭", null)
                             .show();
@@ -886,6 +962,53 @@ public class MainActivity extends Activity {
         config = configStore.load();
         ensureProtocolDefaults(config);
         tasks = taskRepository.loadAll();
+        loadAccountStats();
+    }
+
+    /**
+     * Persists the account totals so the card still shows real numbers after a
+     * restart, instead of falling back to "尚未同步".
+     */
+    private void saveAccountStats(HistoryExtractionResult extracted) {
+        accountTermRuns = extracted.currentRuns;
+        accountTermKm = extracted.currentKm;
+        accountTermTarget = extracted.targetRuns;
+        accountTermLabel = extracted.currentTermLabel;
+        try {
+            getSharedPreferences(STATS_PREFS, MODE_PRIVATE).edit()
+                    .putInt("term_runs", accountTermRuns)
+                    .putLong("term_km_milli", Math.round(accountTermKm * 1000d))
+                    .putInt("term_target", accountTermTarget)
+                    .putString("term_label", accountTermLabel)
+                    .putString("account", config == null ? "" : String.valueOf(config.username))
+                    .putLong("synced_at", System.currentTimeMillis())
+                    .apply();
+        } catch (Exception e) {
+            log.append("学期统计保存失败: " + e);
+        }
+    }
+
+    private void loadAccountStats() {
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences(STATS_PREFS, MODE_PRIVATE);
+            if (!prefs.contains("term_runs")) {
+                accountTermRuns = -1;
+                return;
+            }
+            // Ignore stats belonging to a different account.
+            String savedAccount = prefs.getString("account", "");
+            if (config != null && !blank(config.username) && !savedAccount.isEmpty()
+                    && !savedAccount.equals(config.username)) {
+                accountTermRuns = -1;
+                return;
+            }
+            accountTermRuns = prefs.getInt("term_runs", -1);
+            accountTermKm = prefs.getLong("term_km_milli", 0L) / 1000d;
+            accountTermTarget = prefs.getInt("term_target", 0);
+            accountTermLabel = prefs.getString("term_label", "");
+        } catch (Exception e) {
+            accountTermRuns = -1;
+        }
     }
 
     private void ensureProtocolDefaults(AppConfig target) {
@@ -1135,6 +1258,85 @@ public class MainActivity extends Activity {
         lp.setMargins(0, dp(5), 0, dp(7));
         box.setLayoutParams(lp);
         return box;
+    }
+
+    /**
+     * Shows how many runs the signed-in account has this semester, as reported by the
+     * school's own counter ({@code sumNumber} on the newest term table).
+     * Populated when the online extractor runs; prompts the user until then.
+     */
+    private LinearLayout accountStatsCard() {
+        LinearLayout box = card();
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout headText = new LinearLayout(this);
+        headText.setOrientation(LinearLayout.VERTICAL);
+        headText.addView(metaLabel("本学期跑步次数"));
+        headText.addView(strongText(accountTermRuns < 0 ? "尚未同步" : termRunText()));
+        head.addView(headText, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView badge = new TextView(this);
+        if (termStatsRefreshing) {
+            badge.setText("同步中");
+        } else if (accountTermRuns < 0) {
+            badge.setText(termStatsState.isEmpty() ? "待提取" : termStatsState);
+        } else {
+            badge.setText(termBadge());
+        }
+        badge.setTextSize(12);
+        badge.setTypeface(Typeface.DEFAULT_BOLD);
+        badge.setGravity(Gravity.CENTER);
+        badge.setTextColor(accountTermRuns < 0 ? COLOR_MUTED : COLOR_PRIMARY_DEEP);
+        badge.setBackground(rounded(accountTermRuns < 0 ? 0xFFF1F1EC : COLOR_PRIMARY_SOFT, 0, dp(8)));
+        badge.setPadding(dp(10), dp(6), dp(10), dp(6));
+        head.addView(badge);
+        box.addView(head);
+
+        if (accountTermRuns < 0 && termStatsState.isEmpty()) {
+            box.addView(cardCopy("正在读取本学期跑步次数，也可点击下方「刷新次数」手动同步。"));
+        } else if (accountTermRuns < 0) {
+            box.addView(cardCopy("读取失败（" + termStatsState + "）。点击「刷新次数」重试。"));
+        } else {
+            box.addView(chipRow(new String[]{
+                    "本学期里程 " + HistoryExtractionResult.formatKm(accountTermKm) + " km",
+                    accountTermLabel.isEmpty() ? "当前学期" : accountTermLabel,
+                    "本地记录 " + tasks.size() + " 条"}));
+            box.addView(cardCopy("次数来自学校接口，实时读取；不含日常与随堂记录。"));
+        }
+
+        Button refresh = new Button(this);
+        refresh.setText(termStatsRefreshing ? "同步中…" : "刷新次数");
+        refresh.setAllCaps(false);
+        refresh.setEnabled(!termStatsRefreshing);
+        refresh.setTextSize(13);
+        refresh.setOnClickListener(v -> refreshTermStatsAsync(false));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, dp(40));
+        rlp.setMargins(0, dp(9), 0, 0);
+        box.addView(refresh, rlp);
+        return box;
+    }
+
+    /** "2 / 40 次" when the semester target is known, otherwise just "2 次". */
+    private String termRunText() {
+        if (accountTermTarget > 0) {
+            return accountTermRuns + " / " + accountTermTarget + " 次";
+        }
+        return accountTermRuns + " 次";
+    }
+
+    /** Turns progress toward the semester target into a short qualitative badge. */
+    private String termBadge() {
+        if (accountTermTarget > 0) {
+            int percent = (int) Math.round(accountTermRuns * 100d / accountTermTarget);
+            return percent + "%";
+        }
+        if (accountTermRuns <= 0) return "无记录";
+        if (accountTermRuns >= 30) return "优秀";
+        if (accountTermRuns >= 20) return "良好";
+        if (accountTermRuns >= 10) return "达标";
+        return "进行中";
     }
 
     private TextView cardTitle(String text) {
