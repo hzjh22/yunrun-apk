@@ -24,8 +24,8 @@ public final class ConfigValidator {
         if (!AppConfig.DEFAULT_APP_EDITION.equals(trim(config.appEdition))) {
             warnings.add("当前版本 " + trim(config.appEdition) + "，建议核对是否仍为 " + AppConfig.DEFAULT_APP_EDITION);
         }
-        if (trim(config.schoolHost).contains(":9001")) {
-            warnings.add("跑步接口不应使用 9001/api，已知可用值为 " + AppConfig.DEFAULT_SCHOOL_HOST);
+        if (trim(config.schoolHost).contains(":9001") || trim(config.schoolHost).contains(":9011")) {
+            warnings.add("school_host 不应指向 API 网关端口，已知可用值为 " + AppConfig.DEFAULT_SCHOOL_HOST);
         }
         if (!looksLikeUuid(config.uuid)) {
             warnings.add("uuid 格式不像标准 UUID，但仍允许继续检测接口");

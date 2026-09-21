@@ -174,7 +174,10 @@ public class LoginClient {
     public static String normalizeSchoolHost(String host) {
         String value = host == null ? "" : host.trim();
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
-        if (blank(value) || value.contains(":9001")) return AppConfig.DEFAULT_SCHOOL_HOST;
+        // :9001 was the old dead gateway port; the live gateway is now :9011.
+        if (blank(value) || value.contains(":9001") || value.contains(":9011")) {
+            return AppConfig.DEFAULT_SCHOOL_HOST;
+        }
         return value;
     }
 

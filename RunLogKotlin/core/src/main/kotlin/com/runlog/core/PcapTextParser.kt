@@ -89,8 +89,9 @@ object PcapTextParser {
             if (!headers[key].isNullOrBlank()) score += 1
         }
         val host = headers["host"].orEmpty()
-        if (host.endsWith(":9001")) score += 2
-        if ("sports.aiyyd.com" in host) score += 1
+        // :9001 was the dead gateway port; the live one is :9011. Both identify the API gateway.
+        if (host.endsWith(":9001") || host.endsWith(":9011")) score += 2
+        if ("sports.aiyyd.com" in host || "sports.yzhiee.com" in host) score += 1
         return score
     }
 
@@ -104,7 +105,12 @@ object PcapTextParser {
 
     fun normalizeSchoolHost(base: String, host: String = ""): String {
         val value = base.trim().trimEnd('/')
-        if (host.endsWith(":9001") || value.endsWith(":9001/api") || value.endsWith(":9001")) {
+        // The capture may point at the API gateway (:9001 old, :9011 live) rather than
+        // at the school host, so fall back to the default school host in that case.
+        if (host.endsWith(":9001") || host.endsWith(":9011") ||
+            value.endsWith(":9001/api") || value.endsWith(":9001") ||
+            value.endsWith(":9011/api") || value.endsWith(":9011")
+        ) {
             return DefaultSchoolHost
         }
         return value.ifBlank { DefaultSchoolHost }

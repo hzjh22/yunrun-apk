@@ -3,7 +3,8 @@ import java.util.*;
 import java.util.regex.*;
 
 public class SelfTest {
-    static final String DEFAULT_SCHOOL_HOST = "http://sports.aiyyd.com:8080";
+    // Fixed 2026-09-19: :8080/:9001 are dead (502 / TLS fail); live host is :8000.
+    static final String DEFAULT_SCHOOL_HOST = "https://sports.aiyyd.com:8000";
 
     record Candidate(String requestLine, int score, Map<String, String> headers) {}
 
@@ -59,14 +60,14 @@ public class SelfTest {
             if (headers.containsKey(k) && !headers.get(k).isBlank()) score++;
         }
         String host = headers.getOrDefault("host", "");
-        if (host.endsWith(":9001")) score += 2;
-        if (host.contains("sports.aiyyd.com")) score++;
+        if (host.endsWith(":9001") || host.endsWith(":9011")) score += 2;
+        if (host.contains("sports.aiyyd.com") || host.contains("sports.yzhiee.com")) score++;
         return new Candidate(request, score, headers);
     }
 
     static String normalizeHost(String requestLine, String host) {
         if (host == null || host.isBlank()) return DEFAULT_SCHOOL_HOST;
-        if (host.endsWith(":9001")) return DEFAULT_SCHOOL_HOST;
+        if (host.endsWith(":9001") || host.endsWith(":9011")) return DEFAULT_SCHOOL_HOST;
         return (host.endsWith(":443") ? "https://" : "http://") + host;
     }
 

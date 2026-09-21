@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fixed 2026-09-19 by local runtime verification.
+  Previously only sports.aiyyd.com had a cleartext exception, which combined with
+  android:usesCleartextTraffic="true" still blocked every other school whose
+  schoolUrl is plain HTTP (e.g. http://1.13.251.61:8088/, http://192.168.5.48:8080/).
+  The live default endpoints are HTTPS now, but imported per-school hosts may not be,
+  so a base-config cleartext exception is required for the app to work across schools.
+-->
 <network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">sports.aiyyd.com</domain>
+        <domain includeSubdomains="true">sports.yzhiee.com</domain>
     </domain-config>
 </network-security-config>

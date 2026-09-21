@@ -104,8 +104,9 @@ public final class PcapTextParser {
             if (!blank(headers.get(key))) score++;
         }
         String host = header(headers, "host");
-        if (host.endsWith(":9001")) score += 2;
-        if (host.contains("sports.aiyyd.com")) score += 1;
+        // :9001 was the dead gateway port; the live one is :9011.
+        if (host.endsWith(":9001") || host.endsWith(":9011")) score += 2;
+        if (host.contains("sports.aiyyd.com") || host.contains("sports.yzhiee.com")) score += 1;
         return score;
     }
 
@@ -137,11 +138,14 @@ public final class PcapTextParser {
     public static String normalizeSchoolHost(String base, String host) {
         String value = base == null ? "" : base.trim();
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
-        if (host.endsWith(":9001") || value.endsWith(":9001/api") || value.endsWith(":9001")) {
-            String source = blank(value) ? "http://" + host : value;
-            source = source.replace(":9001/api", ":8080").replace(":9001", ":8080");
-            while (source.endsWith("/")) source = source.substring(0, source.length() - 1);
-            return source;
+        // A capture may point at the API gateway (:9001 old, :9011 live) instead of the
+        // school host. Previously this rewrote :9001 -> :8080, but :8080 is dead now, so
+        // fall back to the verified live default school host.
+        boolean gatewayPort = host.endsWith(":9001") || host.endsWith(":9011")
+                || value.endsWith(":9001/api") || value.endsWith(":9001")
+                || value.endsWith(":9011/api") || value.endsWith(":9011");
+        if (gatewayPort) {
+            return AppConfig.DEFAULT_SCHOOL_HOST;
         }
         return blank(value) ? AppConfig.DEFAULT_SCHOOL_HOST : value;
     }

@@ -1,9 +1,17 @@
 package com.runlog.data;
 
 public class AppConfig {
-    public static final String DEFAULT_SCHOOL_HOST = "http://sports.aiyyd.com:8080";
-    public static final String DEFAULT_API_HOST = "http://sports.aiyyd.com:9001/api";
-    public static final String DEFAULT_APP_EDITION = "3.6.2";
+    // Fixed 2026-09-19 by local runtime verification:
+    //   - old school host http://sports.aiyyd.com:8080  -> port closed (HTTP 502)
+    //   - old api    host http://sports.aiyyd.com:9001  -> port closed (HTTP 502 / TLS fail)
+    //   - old appEdition 3.6.2 -> server now rejects it: "版本过低，请前往应用市场更新！"
+    // Verified live values (login + getHomeRunInfo + schoolList all returned code=200):
+    //   school host  https://sports.aiyyd.com:8000   (also what schoolList returns per school)
+    //   api    host  https://sports.aiyyd.com:9011/api
+    //   appEdition   3.6.6
+    public static final String DEFAULT_SCHOOL_HOST = "https://sports.aiyyd.com:8000";
+    public static final String DEFAULT_API_HOST = "https://sports.aiyyd.com:9011/api";
+    public static final String DEFAULT_APP_EDITION = "3.6.6";
     public static final String DEFAULT_PUBLIC_KEY = "BDdKFsuBf51UObke1pEgfER17biBg/5r8slqE4s8oOa8lVesWgIUxsRc+AmZ72GcuJ56f7avnyJe3CJY4n00LU4=";
     public static final String DEFAULT_CIPHER_KEY = "JXhWGZjmhhXN+nt8nLpNxA==";
     public static final String DEFAULT_CIPHER_KEY_ENCRYPTED = "BGfbsG9EkXz5KeCva8E0MisBeS6bhBEDId3VXeIuBoiBMZU0Mosv7PqKsvqxZ3PjkUlsjzh09Se629SWW45XP4TIUeXoLpYzgk5fAMbg0VNVnXuLH9xVzdHAeM+1qJrgvwwkwio85/DnrP1aArvVQrw3N4xd5tugqQ==";

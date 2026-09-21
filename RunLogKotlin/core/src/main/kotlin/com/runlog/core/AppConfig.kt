@@ -25,9 +25,12 @@ data class AppConfig(
     )
 }
 
-const val DefaultSchoolHost = "http://sports.aiyyd.com:8080"
-const val DefaultApiHost = "http://sports.aiyyd.com:9001/api"
-const val DefaultAppEdition = "3.6.2"
+// Fixed 2026-09-19 by local runtime verification: :8080 and :9001 are dead
+// (HTTP 502 / TLS fail) and appEdition 3.6.2 is rejected by the server
+// ("版本过低，请前往应用市场更新！"). Verified live values below.
+const val DefaultSchoolHost = "https://sports.aiyyd.com:8000"
+const val DefaultApiHost = "https://sports.aiyyd.com:9011/api"
+const val DefaultAppEdition = "3.6.6"
 
 enum class RunMode { QUICK, TABLE }
 enum class PickMode { RANDOM, SPECIFIED }
@@ -79,8 +82,8 @@ object ConfigValidator {
         if (config.appEdition != DefaultAppEdition) {
             warnings += "当前版本 ${config.appEdition}，建议核对是否仍为 $DefaultAppEdition"
         }
-        if (config.schoolHost.contains(":9001")) {
-            warnings += "跑步接口不应使用 9001/api，已知可用值为 $DefaultSchoolHost"
+        if (config.schoolHost.contains(":9001") || config.schoolHost.contains(":9011")) {
+            warnings += "school_host 不应指向 API 网关端口，已知可用值为 $DefaultSchoolHost"
         }
         if (!looksLikeUuid(config.uuid)) {
             warnings += "uuid 格式不像标准 UUID，但仍允许继续检测接口"
