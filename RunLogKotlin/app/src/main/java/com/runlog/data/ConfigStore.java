@@ -21,6 +21,15 @@ public class ConfigStore {
         if (!backupDir.exists()) backupDir.mkdirs();
     }
 
+    /**
+     * Records the edition the server demanded so the next launch starts from it
+     * instead of tripping the gate again.
+     */
+    public void saveLearnedEdition(String edition) {
+        if (edition == null || edition.trim().isEmpty()) return;
+        prefs.edit().putString("app_edition", edition.trim()).apply();
+    }
+
     public AppConfig load() {
         AppConfig config = new AppConfig();
         config.schoolId = prefs.getString("school_id", "");

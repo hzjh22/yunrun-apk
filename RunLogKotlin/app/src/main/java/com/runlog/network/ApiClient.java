@@ -1,5 +1,7 @@
 package com.runlog.network;
 
+import android.util.Log;
+
 import com.runlog.crypto.CryptoUtils;
 import com.runlog.data.AppConfig;
 
@@ -17,7 +19,17 @@ import java.util.zip.GZIPInputStream;
 
 public class ApiClient {
     private static final int TIMEOUT_MS = 20000;
+    private static final String TAG = "RunLog";
     private final AppConfig config;
+
+    /**
+     * Edition the server asked for, shared across every client instance.
+     *
+     * <p>Each extraction builds its own {@link ApiClient} and can issue dozens of
+     * requests, so learning this per instance would trip the gate and retry on every
+     * one of them. Static keeps the cost to a single extra round trip per process.
+     */
+    private static volatile String learnedEdition;
 
     public ApiClient(AppConfig config) {
         this.config = config;
@@ -35,7 +47,66 @@ public class ApiClient {
         return postEncrypted(path, encryptedBodyBytes(gzip(plainJson == null ? "" : plainJson)), false);
     }
 
+    /**
+     * Sends one encrypted request, adapting the client edition once if the server
+     * reports that it is too old.
+     *
+     * <p>The server publishes the edition it wants in the {@code code=911} payload
+     * ({@code data.edtitionName}, e.g. "3.6.7"), so no version needs to be guessed:
+     * the reply is re-sent once using exactly that value. Retrying is capped at one
+     * attempt so a server that keeps answering 911 cannot loop.
+     */
     private String postEncrypted(String path, String body, boolean gzipAfterDecrypt) throws Exception {
+        String edition = currentEdition();
+        String first = sendOnce(path, body, gzipAfterDecrypt, edition);
+
+        String required = outdatedEdition(first);
+        if (required == null) return first;
+
+        if (required.equals(edition)) {
+            // The server named the edition we already sent, so a retry cannot help.
+            throw outdatedFailure(first, required);
+        }
+
+        Log.i(TAG, "服务端要求版本 " + required + "，当前 " + edition + "，自动适配并重试");
+        learnedEdition = required;
+        if (!required.equals(config.appEdition)) {
+            config.appEdition = required;
+        }
+
+        String second = sendOnce(path, body, gzipAfterDecrypt, required);
+        String stillOutdated = outdatedEdition(second);
+        if (stillOutdated != null) {
+            throw outdatedFailure(second, stillOutdated);
+        }
+        return second;
+    }
+
+    /**
+     * The edition to send: the value learned from the server this session, otherwise
+     * the configured value, otherwise the build default.
+     */
+    private String currentEdition() {
+        String learned = learnedEdition;
+        if (learned != null && !learned.trim().isEmpty()) return learned;
+        return blank(config.appEdition) ? AppConfig.DEFAULT_APP_EDITION : config.appEdition;
+    }
+
+    /** Edition the server demanded during this process, or null when it never objected. */
+    public static String learnedEdition() {
+        return learnedEdition;
+    }
+
+    /** Seeds the shared edition from persisted config so a restart adapts immediately. */
+    public static void seedEdition(String edition) {
+        if (edition != null && !edition.trim().isEmpty()) {
+            learnedEdition = edition.trim();
+        }
+    }
+
+    /** Performs exactly one HTTP round trip with the supplied client edition. */
+    private String sendOnce(String path, String body, boolean gzipAfterDecrypt, String appEdition)
+            throws Exception {
         require(config.schoolHost, "schoolHost");
         require(config.token, "token");
         require(config.deviceId, "deviceId");
@@ -45,7 +116,6 @@ public class ApiClient {
         require(config.md5Key, "md5key");
 
         String platform = blank(config.platform) ? "android" : config.platform.toLowerCase(Locale.US);
-        String appEdition = blank(config.appEdition) ? AppConfig.DEFAULT_APP_EDITION : config.appEdition;
         String requestUuid = blank(config.uuid) ? UUID.randomUUID().toString().toUpperCase(Locale.US) : config.uuid;
         long utc = System.currentTimeMillis() / 1000L;
         String sign = CryptoUtils.requestSign(platform, utc, requestUuid, config.md5Key);
@@ -100,7 +170,6 @@ public class ApiClient {
     private String decodeResponse(String response, boolean gzipAfterDecrypt) throws Exception {
         String trimmed = response == null ? "" : response.trim();
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            checkOutdatedEdition(trimmed);
             return trimmed;
         }
         if (trimmed.length() >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
@@ -110,38 +179,72 @@ public class ApiClient {
             return trimmed;
         }
         byte[] decrypted = CryptoUtils.sm4DecryptBase64(trimmed, config.cipherKey);
-        String plain = gzipAfterDecrypt
+        return gzipAfterDecrypt
                 ? ungzip(decrypted)
                 : new String(decrypted, StandardCharsets.UTF_8);
-        checkOutdatedEdition(plain);
-        return plain;
     }
 
     /**
-     * The server enforces a minimum accepted app edition and reports it as
-     * {@code code=911 "当前版本过低，请升级！"} inside an otherwise successful HTTP 200
-     * body. Without this check the caller only sees empty data and reports a vague
-     * failure, so surface the real cause with the version that is required.
+     * Returns the client edition the server demands when {@code json} is a
+     * {@code code=911} "当前版本过低，请升级！" reply, or {@code null} when it is not.
+     *
+     * <p>The payload names the wanted edition in {@code data.edtitionName}. When that
+     * field is missing the versionCode in {@code data.appEdtitionNumber} is used
+     * instead, which is what an older server build exposes.
      */
-    private void checkOutdatedEdition(String json) {
-        if (json == null || !json.contains("911")) return;
+    private static String outdatedEdition(String json) {
+        if (json == null || !json.contains("911")) return null;
         try {
             org.json.JSONObject root = new org.json.JSONObject(json);
-            if (root.optInt("code", 0) != 911) return;
-            String msg = root.optString("msg", "当前版本过低，请升级！");
-            String required = "";
+            if (root.optInt("code", 0) != 911) return null;
             org.json.JSONObject data = root.optJSONObject("data");
-            if (data != null) {
-                required = data.optString("appEdtitionNumber", "").trim();
+            if (data == null) return "";
+            String name = data.optString("edtitionName", "").trim();
+            if (!name.isEmpty()) return name;
+            String versionCode = data.optString("appEdtitionNumber", "").trim();
+            if (!versionCode.isEmpty()) {
+                // No name published: fall back to a version at least as new as required.
+                return editionFromVersionCode(versionCode);
             }
-            StringBuilder hint = new StringBuilder(msg);
-            hint.append("（当前 ").append(blank(config.appEdition) ? "未知" : config.appEdition);
-            if (!required.isEmpty()) hint.append("，服务端要求 versionCode ").append(required);
-            hint.append("）请更新到官方最新版本后重试");
-            throw new IllegalStateException(hint.toString());
-        } catch (org.json.JSONException ignored) {
-            // Not a JSON body we understand; leave the caller's normal handling intact.
+            return "";
+        } catch (org.json.JSONException e) {
+            return null;
         }
+    }
+
+    /**
+     * Maps a versionCode such as "65" to a client edition string.
+     *
+     * <p>Only used when the server omits {@code edtitionName}. The official builds seen
+     * so far are 3.6.6/64 and 3.6.7/65, i.e. {@code 58 + minor}, so the current minor
+     * is carried forward rather than guessed. The result is a floor: the caller retries
+     * once and, if the server still objects, reports its exact wording.
+     */
+    private static String editionFromVersionCode(String versionCode) {
+        try {
+            int code = Integer.parseInt(versionCode.trim());
+            int minor = code - 58;
+            if (minor > 0) return "3.6." + minor;
+        } catch (NumberFormatException ignored) {
+            // fall through
+        }
+        return "";
+    }
+
+    /** Builds the error reported when the server keeps demanding a newer edition. */
+    private IllegalStateException outdatedFailure(String json, String required) {
+        String msg = "当前版本过低，请升级！";
+        try {
+            org.json.JSONObject root = new org.json.JSONObject(json);
+            msg = root.optString("msg", msg);
+        } catch (org.json.JSONException ignored) {
+            // keep the default wording
+        }
+        String saw = blank(config.appEdition) ? "未知" : config.appEdition;
+        StringBuilder sb = new StringBuilder(msg)
+                .append("（服务端要求 ").append(required.trim().isEmpty() ? "更高版本" : required)
+                .append("，当前 ").append(saw).append("）");
+        return new IllegalStateException(sb.toString());
     }
 
     private static String read(HttpURLConnection conn, InputStream raw) throws Exception {

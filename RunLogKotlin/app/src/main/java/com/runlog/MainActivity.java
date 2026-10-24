@@ -30,6 +30,7 @@ import com.runlog.data.ConfigStore;
 import com.runlog.data.ConfigValidationResult;
 import com.runlog.data.ConfigValidator;
 import com.runlog.log.FileLog;
+import com.runlog.network.ApiClient;
 import com.runlog.network.LoginClient;
 import com.runlog.network.LoginResult;
 import com.runlog.network.HistoryClient;
@@ -512,6 +513,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 termStatsRefreshing = false;
                 if (stats != null) {
+                    persistLearnedEdition();
                     saveAccountStats(stats);
                     termStatsState = "";
                     log.append("本学期次数已刷新: " + stats.currentRuns
@@ -799,6 +801,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(this::updateHistoryProgressViews);
                 });
                 TaskRepository.ImportResult saved = taskRepository.saveExtractedTasks("在线历史接口", extracted.taskJsons);
+                runOnUiThread(this::persistLearnedEdition);
                 saveAccountStats(extracted);
                 runOnUiThread(() -> {
                     reload();
@@ -961,8 +964,25 @@ public class MainActivity extends Activity {
     private void reload() {
         config = configStore.load();
         ensureProtocolDefaults(config);
+        // Start from the persisted edition so a launch after an adaptation does not
+        // trip the version gate once more.
+        ApiClient.seedEdition(config.appEdition);
         tasks = taskRepository.loadAll();
         loadAccountStats();
+    }
+
+    /**
+     * If the server named a newer edition during this process, persist it so the next
+     * launch uses it directly, and surface the change in the log.
+     */
+    private void persistLearnedEdition() {
+        String learned = ApiClient.learnedEdition();
+        if (learned == null || learned.trim().isEmpty()) return;
+        if (learned.equals(config.appEdition)) return;
+        String previous = config.appEdition;
+        config.appEdition = learned;
+        configStore.saveLearnedEdition(learned);
+        log.append("已自动适配服务端要求的版本: " + previous + " -> " + learned);
     }
 
     /**

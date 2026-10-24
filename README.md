@@ -38,14 +38,49 @@ https://github.com/hzjh22/yunrun-apk/releases
 | 2026-09-19 | 3.6.6 | 3.6.2 被拒（`code=500`） |
 | 2026-10-20 起 | **3.6.7**（versionCode 65） | 3.6.6 被拒（`code=911`） |
 
-当前代码已适配 **3.6.7**。若将来再次出现 `code=911`，按以下步骤更新：
+### 自动适配（已内置）
 
-1. 从服务端返回的 `data.appEdtitionNumber` 读出要求的新 versionCode；
-2. 找到对应的官方版本号，修改下面两个常量后重新编译：
-   - `RunLogKotlin/app/src/main/java/com/runlog/data/AppConfig.java` → `DEFAULT_APP_EDITION`
-   - `RunLogKotlin/core/src/main/kotlin/com/runlog/core/AppConfig.kt` → `DefaultAppEdition`
+**当前版本已内置自适应，正常情况无需任何手动操作。**
 
-`ConfigStore` 会自动把已保存的旧版本号纠正到不低于当前编译版本，并回写配置，
+服务端在 911 响应里直接说明它要哪个版本：
+
+```json
+{"code":911, "msg":"当前版本过低，请升级！",
+ "data":{"edtitionName":"3.6.7", "appEdtitionNumber":"65"}}
+```
+
+`ApiClient` 的逻辑：
+
+1. 用当前版本发送请求；
+2. 若收到 `code=911`，读取 `data.edtitionName`（缺失时回退到 `appEdtitionNumber` 推算）；
+3. 用服务端指定版本**重试一次**；
+4. 学到的版本写入内存（全进程共享）并持久化，**后续请求和下次启动都不再触发重试**。
+
+**只会重试一次**。若重试后仍被拒，或服务端返回的版本号与当前相同（说明重试无意义），
+直接抛出带明确信息的错误，不会死循环：
+
+```
+当前版本过低，请升级！（服务端要求 3.7.0，当前 3.6.7）
+```
+
+日志里也会记录适配过程：
+
+```
+服务端要求版本 3.7.0，当前 3.6.7，自动适配并重试
+已自动适配服务端要求的版本: 3.6.7 -> 3.7.0
+```
+
+### 什么情况下仍需改代码
+
+自动适配覆盖「服务端只是抬高了版本号」这一种情况 —— 这也是实际遇到的全部情况。
+若官方大版本更新后**接口本身变了**（字段改名、新增加密、路径变更），
+那就不是版本号能解决的，需要按新接口重新适配。
+届时修改下面两个常量作为新的基线：
+
+- `RunLogKotlin/app/src/main/java/com/runlog/data/AppConfig.java` → `DEFAULT_APP_EDITION`
+- `RunLogKotlin/core/src/main/kotlin/com/runlog/core/AppConfig.kt` → `DefaultAppEdition`
+
+`ConfigStore` 会把已保存的旧版本号纠正到不低于当前编译版本并回写，
 所以已安装用户升级 APK 即可生效，无需手动清配置。
 
 ## 项目结构
