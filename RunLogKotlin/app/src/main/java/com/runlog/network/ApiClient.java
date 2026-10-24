@@ -100,6 +100,7 @@ public class ApiClient {
     private String decodeResponse(String response, boolean gzipAfterDecrypt) throws Exception {
         String trimmed = response == null ? "" : response.trim();
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            checkOutdatedEdition(trimmed);
             return trimmed;
         }
         if (trimmed.length() >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
@@ -109,10 +110,38 @@ public class ApiClient {
             return trimmed;
         }
         byte[] decrypted = CryptoUtils.sm4DecryptBase64(trimmed, config.cipherKey);
-        if (!gzipAfterDecrypt) {
-            return new String(decrypted, StandardCharsets.UTF_8);
+        String plain = gzipAfterDecrypt
+                ? ungzip(decrypted)
+                : new String(decrypted, StandardCharsets.UTF_8);
+        checkOutdatedEdition(plain);
+        return plain;
+    }
+
+    /**
+     * The server enforces a minimum accepted app edition and reports it as
+     * {@code code=911 "当前版本过低，请升级！"} inside an otherwise successful HTTP 200
+     * body. Without this check the caller only sees empty data and reports a vague
+     * failure, so surface the real cause with the version that is required.
+     */
+    private void checkOutdatedEdition(String json) {
+        if (json == null || !json.contains("911")) return;
+        try {
+            org.json.JSONObject root = new org.json.JSONObject(json);
+            if (root.optInt("code", 0) != 911) return;
+            String msg = root.optString("msg", "当前版本过低，请升级！");
+            String required = "";
+            org.json.JSONObject data = root.optJSONObject("data");
+            if (data != null) {
+                required = data.optString("appEdtitionNumber", "").trim();
+            }
+            StringBuilder hint = new StringBuilder(msg);
+            hint.append("（当前 ").append(blank(config.appEdition) ? "未知" : config.appEdition);
+            if (!required.isEmpty()) hint.append("，服务端要求 versionCode ").append(required);
+            hint.append("）请更新到官方最新版本后重试");
+            throw new IllegalStateException(hint.toString());
+        } catch (org.json.JSONException ignored) {
+            // Not a JSON body we understand; leave the caller's normal handling intact.
         }
-        return ungzip(decrypted);
     }
 
     private static String read(HttpURLConnection conn, InputStream raw) throws Exception {

@@ -5,13 +5,18 @@ public class AppConfig {
     //   - old school host http://sports.aiyyd.com:8080  -> port closed (HTTP 502)
     //   - old api    host http://sports.aiyyd.com:9001  -> port closed (HTTP 502 / TLS fail)
     //   - old appEdition 3.6.2 -> server now rejects it: "版本过低，请前往应用市场更新！"
+    // Updated 2026-10-24 for the official 3.6.7 release (versionCode 65):
+    //   the server began enforcing a newer minimum on 2026-10-20 and answers
+    //   code=911 "当前版本过低，请升级！" to 3.6.6. The upgrade payload reports
+    //   appEdtitionNumber=65, which is exactly the 3.6.7 build, so 3.6.6 is no
+    //   longer accepted and 3.6.7 is.
     // Verified live values (login + getHomeRunInfo + schoolList all returned code=200):
     //   school host  https://sports.aiyyd.com:8000   (also what schoolList returns per school)
     //   api    host  https://sports.aiyyd.com:9011/api
-    //   appEdition   3.6.6
+    //   appEdition   3.6.7
     public static final String DEFAULT_SCHOOL_HOST = "https://sports.aiyyd.com:8000";
     public static final String DEFAULT_API_HOST = "https://sports.aiyyd.com:9011/api";
-    public static final String DEFAULT_APP_EDITION = "3.6.6";
+    public static final String DEFAULT_APP_EDITION = "3.6.7";
     public static final String DEFAULT_PUBLIC_KEY = "BDdKFsuBf51UObke1pEgfER17biBg/5r8slqE4s8oOa8lVesWgIUxsRc+AmZ72GcuJ56f7avnyJe3CJY4n00LU4=";
     public static final String DEFAULT_CIPHER_KEY = "JXhWGZjmhhXN+nt8nLpNxA==";
     public static final String DEFAULT_CIPHER_KEY_ENCRYPTED = "BGfbsG9EkXz5KeCva8E0MisBeS6bhBEDId3VXeIuBoiBMZU0Mosv7PqKsvqxZ3PjkUlsjzh09Se629SWW45XP4TIUeXoLpYzgk5fAMbg0VNVnXuLH9xVzdHAeM+1qJrgvwwkwio85/DnrP1aArvVQrw3N4xd5tugqQ==";

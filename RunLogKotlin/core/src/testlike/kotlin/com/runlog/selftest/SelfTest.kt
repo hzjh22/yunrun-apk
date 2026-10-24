@@ -15,7 +15,7 @@ fun main() {
         token: 1234567890abcdef
         deviceid: abcdef1234567890abcdef1234567890
         devicename: vivo(V2359A)
-        version: 3.6.6
+        version: 3.6.7
         platform: android
         uuid: BE4F7B9D-BA79-4046-A116-96B25CB95C43
         utc: 1781953823

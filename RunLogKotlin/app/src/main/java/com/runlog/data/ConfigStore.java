@@ -26,7 +26,17 @@ public class ConfigStore {
         config.schoolId = prefs.getString("school_id", "");
         config.schoolName = prefs.getString("school_name", "");
         config.schoolHost = prefs.getString("school_host", AppConfig.DEFAULT_SCHOOL_HOST);
-        config.appEdition = prefs.getString("app_edition", AppConfig.DEFAULT_APP_EDITION);
+        // The server periodically raises its minimum accepted app edition and answers
+        // code=911 "当前版本过低，请升级！" to anything older. A stored value therefore
+        // goes stale on its own, so never let a saved edition older than the build's
+        // default win — otherwise an upgraded APK keeps sending the rejected version.
+        // The corrected value is written back so the stored config matches what is
+        // actually being sent, which keeps the settings screen honest.
+        String storedEdition = prefs.getString("app_edition", AppConfig.DEFAULT_APP_EDITION);
+        config.appEdition = maxEdition(storedEdition, AppConfig.DEFAULT_APP_EDITION);
+        if (!config.appEdition.equals(storedEdition)) {
+            prefs.edit().putString("app_edition", config.appEdition).apply();
+        }
         config.platform = prefs.getString("platform", "android");
         config.publicKey = getOrDefault("public_key", AppConfig.DEFAULT_PUBLIC_KEY);
         config.cipherKey = getOrDefault("cipher_key", AppConfig.DEFAULT_CIPHER_KEY);
@@ -134,6 +144,46 @@ public class ConfigStore {
             return defaultValue;
         }
         return value;
+    }
+
+    /**
+     * Returns whichever dotted version string is numerically newer.
+     *
+     * <p>Used so a stored app edition cannot regress below the one this build was
+     * compiled against. Compares segment by segment, padding the shorter side with
+     * zeros, so "3.6.10" correctly beats "3.6.7". Falls back to the build default
+     * whenever either side is not a plain dotted number.
+     */
+    private static String maxEdition(String stored, String buildDefault) {
+        if (stored == null || stored.trim().isEmpty()) return buildDefault;
+        String a = stored.trim();
+        String b = buildDefault == null ? "" : buildDefault.trim();
+        if (b.isEmpty()) return a;
+        String[] pa = a.split("\\.");
+        String[] pb = b.split("\\.");
+        int len = Math.max(pa.length, pb.length);
+        for (int i = 0; i < len; i++) {
+            int va = segment(pa, i);
+            int vb = segment(pb, i);
+            if (va < 0 || vb < 0) return b;   // not a dotted numeric version -> trust build
+            if (va > vb) return a;
+            if (va < vb) return b;
+        }
+        return b;   // equal -> build default
+    }
+
+    private static int segment(String[] parts, int index) {
+        if (index >= parts.length) return 0;
+        String p = parts[index].trim();
+        if (p.isEmpty()) return 0;
+        for (int i = 0; i < p.length(); i++) {
+            if (!Character.isDigit(p.charAt(i))) return -1;
+        }
+        try {
+            return Integer.parseInt(p);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private static String normalizeRunMode(String value) {

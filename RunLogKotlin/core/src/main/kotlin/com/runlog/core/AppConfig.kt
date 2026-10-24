@@ -28,9 +28,13 @@ data class AppConfig(
 // Fixed 2026-09-19 by local runtime verification: :8080 and :9001 are dead
 // (HTTP 502 / TLS fail) and appEdition 3.6.2 is rejected by the server
 // ("版本过低，请前往应用市场更新！"). Verified live values below.
+//
+// Updated 2026-10-24: the server started enforcing a newer minimum on
+// 2026-10-20 and replies code=911 "当前版本过低，请升级！" to 3.6.6. The upgrade
+// payload reports appEdtitionNumber=65, which is the official 3.6.7 build.
 const val DefaultSchoolHost = "https://sports.aiyyd.com:8000"
 const val DefaultApiHost = "https://sports.aiyyd.com:9011/api"
-const val DefaultAppEdition = "3.6.6"
+const val DefaultAppEdition = "3.6.7"
 
 enum class RunMode { QUICK, TABLE }
 enum class PickMode { RANDOM, SPECIFIED }
